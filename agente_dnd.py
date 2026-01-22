@@ -1,30 +1,27 @@
 import os
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
-import google.generativeai as genai
 from dotenv import load_dotenv 
 
 load_dotenv()
 
 if "GOOGLE_API_KEY" not in os.environ:
     print("ERRO: A variável GOOGLE_API_KEY não foi encontrada no arquivo .env")
-else:
-    genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
 
 print("🔮 Invocando o Mestre dos Magos...")
 
 # 1. Carregar o Banco Vetorial Existente
 embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-vector_db = Chroma(persist_directory="./dnd_db_hybrid_2024", embedding_function=embedding_model)
+vector_db = Chroma(persist_directory="./dnd_db_full", embedding_function=embedding_model)
 
 # 2. Configurar o Modelo (Gemini 1.5 Flash - Rápido e Grátis)
-llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.3)
+llm = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0.3)
 
 def buscar_regras(pergunta):
-    # Recupera os 100 documentos mais relevantes
+    # Recupera os 10 documentos mais relevantes
     # O modelo multilíngue entende que "Bola de Fogo" = "Fireball"
-    docs = vector_db.similarity_search(pergunta, k=100)
+    docs = vector_db.similarity_search(pergunta, k=10)
     return docs
 
 def gerar_resposta(pergunta, contexto_docs):
