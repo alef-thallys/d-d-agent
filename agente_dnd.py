@@ -1,69 +1,188 @@
 import os
+import time
+from dotenv import load_dotenv
+
+# --- IMPORTS DO LANGCHAIN (LCEL) ---
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
-from dotenv import load_dotenv 
 
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder 
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.runnables.history import RunnableWithMessageHistory
+
+from langchain_community.chat_message_histories import ChatMessageHistory
+
+# --- INTERFACE VISUAL (RICH) ---
+from rich.console import Console
+from rich.panel import Panel
+from rich.markdown import Markdown
+from rich.live import Live
+
+# --------------------------------------------------
+# CONFIGURAÇÃO INICIAL
+# --------------------------------------------------
 load_dotenv()
+console = Console()
 
-if "GOOGLE_API_KEY" not in os.environ:
-    print("ERRO: A variável GOOGLE_API_KEY não foi encontrada no arquivo .env")
+DB_DIR = "./dnd_db_2026"
+GEMINI_MODEL = "gemini-2.0-flash-lite"
 
-print("🔮 Invocando o Mestre dos Magos...")
+# --------------------------------------------------
+# CHECAGEM DE SISTEMA
+# --------------------------------------------------
+def check_system():
+    with console.status(
+        "[bold yellow]🔍 Verificando integridade dos grimórios...[/bold yellow]",
+        spinner="dots"
+    ):
+        time.sleep(1)
 
-# 1. Carregar o Banco Vetorial Existente
-embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-vector_db = Chroma(persist_directory="./dnd_db_full", embedding_function=embedding_model)
+        if "GOOGLE_API_KEY" not in os.environ:
+            console.print("[bold red]❌ GOOGLE_API_KEY não encontrada[/bold red]")
+            console.print("[yellow]→ Verifique o arquivo .env[/yellow]")
+            raise SystemExit(1)
 
-# 2. Configurar o Modelo (Gemini 1.5 Flash - Rápido e Grátis)
-llm = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0.3)
+        if not os.path.exists(DB_DIR):
+            console.print(f"[bold red]❌ Banco vetorial '{DB_DIR}' não encontrado[/bold red]")
+            console.print("[yellow]→ Execute create_db_hybrid.py ou ingest_pdf.py primeiro[/yellow]")
+            raise SystemExit(1)
 
-def buscar_regras(pergunta):
-    # Recupera os 10 documentos mais relevantes
-    # O modelo multilíngue entende que "Bola de Fogo" = "Fireball"
-    docs = vector_db.similarity_search(pergunta, k=10)
-    return docs
+    console.print("[bold green]✅ Sistema validado![/bold green]\n")
 
-def gerar_resposta(pergunta, contexto_docs):
-    contexto_texto = "\n\n---\n\n".join([d.page_content for d in contexto_docs])
-    
-    prompt = f"""
-    Você é um Mestre de D&D 5ª Edição experiente e prestativo.
-    
-    INSTRUÇÕES:
-    1. O usuário fará perguntas em PORTUGUÊS.
-    2. Use o CONTEXTO abaixo (que está em Inglês) como fonte da verdade absoluta.
-    3. Responda em PORTUGUÊS.
-    4. Ao citar termos técnicos (Magias, Habilidades), use o termo em Português e coloque o original em inglês entre parênteses na primeira vez. 
-       Ex: "Você usa Mãos Mágicas (Mage Hand)..."
-    5. Se a resposta exigir cálculo (dano, acerto), explique a fórmula.
+# --------------------------------------------------
+# PROMPT (LCEL) COM MEMÓRIA
+# --------------------------------------------------
+PROMPT = ChatPromptTemplate.from_messages([
+    (
+        "system",
+        "Você é um Mestre de D&D 5ª Edição experiente e imersivo.\n"
+        "Use APENAS o contexto fornecido abaixo para responder.\n"
+        "Responda em português usando Markdown.\n"
+        "Se a resposta não estiver no contexto, diga claramente que não encontrou nos livros oficiais."
+    ),
+    MessagesPlaceholder(variable_name="history"), # <--- O histórico entra aqui automaticamente
+    (
+        "human",
+        "CONTEXTO DO GRIMÓRIO (REGRAS):\n{context}\n\n"
+        "PERGUNTA DO JOGADOR:\n{question}"
+    )
+])
 
-    CONTEXTO (Regras em Inglês):
-    {contexto_texto}
+# --------------------------------------------------
+# SETUP DO AGENTE (LCEL MODERNO)
+# --------------------------------------------------
+def setup_agent():
+    with console.status(
+        "[bold purple]🔮 Invocando o Mestre dos Magos...[/bold purple]",
+        spinner="moon"
+    ):
+        embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+        )
 
-    PERGUNTA DO JOGADOR: 
-    {pergunta}
-    
-    RESPOSTA DO MESTRE:
-    """
-    
-    resposta = llm.invoke(prompt)
-    return resposta.content
+        # ⚠️ CORREÇÃO: Adicionado collection_name para achar os dados do PDF
+        vector_db = Chroma(
+            persist_directory=DB_DIR,
+            embedding_function=embeddings,
+            collection_name="dnd_rules" 
+        )
 
-#Loop do Chat
-print("\n--- RAG D&D 5e (Base: GitHub English | Chat: Português) ---")
-print("Digite 'sair' para encerrar.\n")
+        retriever = vector_db.as_retriever(search_kwargs={"k": 5})
 
-while True:
-    user_input = input("🧙 Pergunta: ")
-    if user_input.lower() in ["sair", "exit"]: break
-    
-    # 1. Retrieval
-    print("   (Consultando grimório...)", end="\r")
-    docs = buscar_regras(user_input)
-    
-    # 2. Generation
-    resposta = gerar_resposta(user_input, docs)
-    
-    print(f"\n📜 Mestre: {resposta}\n")
-    print("-" * 50)
+        llm = ChatGoogleGenerativeAI(
+            model=GEMINI_MODEL,
+            temperature=0.4,
+            streaming=True
+        )
+
+        def format_docs(docs):
+            return "\n\n".join(doc.page_content for doc in docs)
+
+        # Chain LCEL com injeção de contexto + memória
+        rag_chain = (
+            RunnablePassthrough.assign(
+                context=(lambda x: x["question"]) | retriever | format_docs
+            )
+            | PROMPT
+            | llm
+            | StrOutputParser()
+        )
+
+        # Histórico em memória volátil
+        chat_history = ChatMessageHistory()
+
+        conversational_chain = RunnableWithMessageHistory(
+            rag_chain,
+            lambda session_id: chat_history,
+            input_messages_key="question",
+            history_messages_key="history"
+        )
+
+    return conversational_chain
+
+# --------------------------------------------------
+# LOOP PRINCIPAL
+# --------------------------------------------------
+def main():
+    console.clear()
+    console.print(Panel.fit(
+        "[bold yellow]🐉 RAG D&D 5e — Mestre Digital (LCEL)[/bold yellow]\n"
+        "[italic]Pergunte sobre regras, magias, monstros...[/italic]",
+        border_style="red",
+        subtitle="v3.3 • Full Connected"
+    ))
+
+    check_system()
+    chain = setup_agent()
+
+    console.print("[dim]Sistema online. Digite 'sair' para encerrar.[/dim]\n")
+
+    while True:
+        try:
+            user_input = console.input("[bold cyan]🧙 Você:[/bold cyan] ")
+
+            if user_input.lower() in {"sair", "exit", "quit"}:
+                console.print("[bold red]🎲 O Mestre encerra a sessão.[/bold red]")
+                break
+
+            if not user_input.strip():
+                continue
+
+            start_time = time.time()
+            resposta_final = ""
+
+            with Live(
+                Panel("Consultando os grimórios...", title="📜 Mestre", border_style="green"),
+                refresh_per_second=12
+            ) as live_panel:
+
+                resposta = chain.invoke(
+                    {"question": user_input},
+                    config={"configurable": {"session_id": "mesa-principal"}}
+                )
+
+                # Simulação visual de digitação
+                for word in resposta.split():
+                    resposta_final += word + " "
+                    time.sleep(0.03)
+                    live_panel.update(
+                        Panel(
+                            Markdown(resposta_final),
+                            title="📜 Mestre",
+                            border_style="green"
+                        )
+                    )
+
+            tempo = time.time() - start_time
+            console.print(f"[dim right]Tempo: {tempo:.2f}s[/dim right]\n")
+
+        except KeyboardInterrupt:
+            print("\n")
+            break
+        except Exception as e:
+            console.print(f"[bold red]❌ Erro inesperado:[/bold red] {e}")
+
+if __name__ == "__main__":
+    main()

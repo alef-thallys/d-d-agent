@@ -1,2 +1,5 @@
 .env
+.vscode
+dnd_db_2026
 venv
+*.pdf

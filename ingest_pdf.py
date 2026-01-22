@@ -1,70 +1,93 @@
 import os
+
+# --- IMPORTS MODERNOS ---
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma 
+
+# --- INTERFACE VISUAL ---
+from rich.console import Console
+from rich.panel import Panel
+from rich.theme import Theme
+from tqdm import tqdm
 
 # --- CONFIGURAÇÃO ---
-# Nome exato do arquivo PDF que você enviou
-PDF_PATH = "dd-5e-livro-do-jogador-fundo-branco-biblioteca-elfica.pdf"
-# A pasta do banco de dados que criamos no passo anterior
-DB_DIR = "./dnd_db_full"
+# Nome exato do arquivo PDF (deve estar na mesma pasta)
+PDF_PATH = "dd-5e-livro-do-jogador.pdf"
+DB_DIR = "./dnd_db_2026"
+
+# Configuração visual
+custom_theme = Theme({"info": "cyan", "warning": "yellow", "error": "bold red", "success": "bold green"})
+console = Console(theme=custom_theme)
 
 def processar_pdf():
-    print(f"📘 Lendo o grimório: {PDF_PATH}...")
+    console.print(Panel.fit(f"📘 Iniciando Ingestão de Grimório: [bold]{PDF_PATH}[/bold]", style="blue"))
     
     if not os.path.exists(PDF_PATH):
-        print("❌ Erro: Arquivo PDF não encontrado na pasta raiz.")
-        return
+        console.print(f"[error]❌ Erro: O arquivo '{PDF_PATH}' não foi encontrado na pasta raiz.[/error]")
+        console.print("[warning]→ Verifique o nome do arquivo ou se ele está na pasta correta.[/warning]")
+        return []
 
-    # 1. Carrega o PDF página por página
-    loader = PyPDFLoader(PDF_PATH)
-    pages = loader.load()
-    print(f"   > PDF carregado: {len(pages)} páginas encontradas.")
+    # 1. Carrega o PDF
+    with console.status("[bold blue]Lendo páginas do PDF...[/bold blue]", spinner="dots"):
+        loader = PyPDFLoader(PDF_PATH)
+        pages = loader.load()
+    
+    console.print(f"[success]✅ PDF carregado: {len(pages)} páginas encontradas.[/success]")
 
-    # 2. Configura o "Cortador" de texto (Splitter)
-    # chunk_size=1000: Cada pedaço terá ~1000 caracteres (aprox 1 parágrafo grande)
-    # chunk_overlap=200: 200 caracteres repetidos entre pedaços para não cortar frases no meio
+    # 2. Configura o "Cortador" (Splitter)
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
         chunk_overlap=200,
-        separators=["\n\n", "\n", " ", ""] # Tenta quebrar em parágrafos primeiro
+        separators=["\n\n", "\n", " ", ""]
     )
 
-    # 3. Corta as páginas em pedaços menores (chunks)
-    print("✂️  Dividindo o texto em chunks inteligentes...")
-    chunks = text_splitter.split_documents(pages)
-    
-    # Adiciona metadados extras para o Mestre saber a origem
-    for i, chunk in enumerate(chunks):
-        chunk.metadata["source"] = "Players Handbook (PDF)"
-        chunk.metadata["type"] = "pdf_content"
-        # Opcional: Tentar limpar cabeçalhos repetitivos se necessário
-        # chunk.page_content = chunk.page_content.replace("LIVRO DO JOGADOR", "")
+    # 3. Corta em chunks
+    with console.status("[bold purple]Fatiando o conhecimento em pedaços mágicos...[/bold purple]", spinner="moon"):
+        chunks = text_splitter.split_documents(pages)
+        
+        # Adiciona metadados
+        for chunk in chunks:
+            chunk.metadata["source"] = "Livro do Jogador (PDF)"
+            chunk.metadata["type"] = "pdf_content"
 
-    print(f"📦 Total de chunks criados: {len(chunks)}")
+    console.print(f"[info]📦 Total de chunks gerados:[/info] [bold white]{len(chunks)}[/bold white]")
     return chunks
 
-# --- EXECUÇÃO ---
+def main():
+    # 1. Processa o Arquivo
+    novos_documentos = processar_pdf()
 
-print("🧠 Carregando Modelo de IA...")
-embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+    if not novos_documentos:
+        return
 
-novos_documentos = processar_pdf()
+    # 2. Carrega Embeddings
+    with console.status("[bold green]Carregando modelo de Embeddings...[/bold green]", spinner="dots"):
+        embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
-if novos_documentos:
-    print(f"💾 Adicionando ao banco de dados existente em '{DB_DIR}'...")
+    console.print(f"[info]💾 Conectando ao banco de dados em '{DB_DIR}'...[/info]")
     
-    # Carrega o banco existente para ADICIONAR (não sobrescrever)
+    # 3. Inicializa o Banco (Modo Append)
     vector_db = Chroma(
         persist_directory=DB_DIR, 
-        embedding_function=embedding_model
+        embedding_function=embedding_model,
+        collection_name="dnd_rules" # Importante: Usar a mesma collection do create_db
     )
     
-    # Adiciona os novos chunks do PDF
-    # O Chroma lida com o gerenciamento de IDs automaticamente
-    vector_db.add_documents(novos_documentos)
+    # 4. Adiciona em Lotes com Barra de Progresso
+    batch_size = 100
+    total_docs = len(novos_documentos)
     
-    print("✅ SUCESSO! O Livro do Jogador foi assimilado pelo Mestre.")
-else:
-    print("❌ Nenhum texto foi processado.")
+    console.print("[bold cyan]Iniciando assimilação de conhecimento...[/bold cyan]")
+    
+    with tqdm(total=total_docs, desc="Indexando", unit="chunk", colour="green") as pbar:
+        for i in range(0, total_docs, batch_size):
+            batch = novos_documentos[i:i + batch_size]
+            vector_db.add_documents(batch)
+            pbar.update(len(batch))
+            
+    console.print(Panel(f"✅ SUCESSO!\nO conteúdo do PDF foi adicionado ao grimório em: {DB_DIR}", style="bold green"))
+
+if __name__ == "__main__":
+    main()
