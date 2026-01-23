@@ -7,12 +7,11 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.theme import Theme
 
-# --- CONFIGURAÇÃO ---
 LIB_DIR = "./biblioteca"
-OUTPUT_JSON = "rag_ready_v2.json" # Novo arquivo para não sobrescrever o antigo
+OUTPUT_JSON = "rag_v5.json" 
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
-PAGE_OFFSET = -1 # Ajuste conforme seu PDF
+PAGE_OFFSET = -1 
 
 CHAPTER_MAP = {
     "Capítulo 1: Criação de Personagem": 11,   
@@ -58,14 +57,12 @@ def process_pdf(file_path):
 
         if idx_start >= total_pages_pdf: continue
 
-        # Extrai texto do capítulo
         chapter_pages = all_pages[idx_start:idx_end]
         chapter_text = "\n".join([p.page_content for p in chapter_pages])
         chapter_text = clean_text(chapter_text)
 
         console.print(f"[info]📖 Processando {chapter_title}...[/info]")
 
-        # Divide por Sub-seções (Detector de Caixa Alta)
         sections = SECTION_PATTERN.split(chapter_text)
         current_section = "Introdução"
 
@@ -73,29 +70,25 @@ def process_pdf(file_path):
             segment = segment.strip()
             if not segment: continue
 
-            # Se for título (impar na lista do split regex)
             if j % 2 != 0: 
                 current_section = segment.title()
                 continue
             
-            # Processamento do Conteúdo
             splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
             chunks = splitter.split_text(segment)
             
             for chunk in chunks:
                 if len(chunk) < 50: continue
                 
-                # --- O SEGREDO DO RAG PRO ---
-                # Injetamos o contexto explicitamente no texto que será vetorizado
                 contextualized_content = f"Fonte: {chapter_title} > {current_section}\n---\n{chunk}"
                 
                 rag_docs.append({
-                    "content": contextualized_content, # O texto rico vai aqui
+                    "content": contextualized_content,
                     "metadata": {
                         "source": os.path.basename(file_path),
                         "chapter": chapter_title,
                         "section": current_section,
-                        "original_content": chunk # Mantemos o original se precisar exibir limpo
+                        "original_content": chunk
                     }
                 })
 
