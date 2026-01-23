@@ -27,7 +27,7 @@ load_dotenv()
 console = Console()
 
 DB_DIR = "./dnd_db_2026"
-GEMINI_MODEL = "gemini-2.0-flash-lite"
+GEMINI_MODEL = "gemini-flash-latest"
 
 # --------------------------------------------------
 # CHECAGEM DE SISTEMA
@@ -93,7 +93,7 @@ def setup_agent():
 
         llm = ChatGoogleGenerativeAI(
             model=GEMINI_MODEL,
-            temperature=0.4,
+            temperature=0.0,
             streaming=True
         )
 
