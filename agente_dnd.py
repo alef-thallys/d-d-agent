@@ -1,188 +1,132 @@
 import os
 import time
+import json
 from dotenv import load_dotenv
 
-# --- IMPORTS DO LANGCHAIN (LCEL) ---
+# --- IMPORTS LANGCHAIN ---
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
-
+from langchain_community.retrievers import BM25Retriever
+from langchain.retrievers import EnsembleRetriever
+from langchain.retrievers import MultiQueryRetriever 
+from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
+from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
 
-from langchain_community.chat_message_histories import ChatMessageHistory
-
-# --- INTERFACE VISUAL (RICH) ---
+# --- INTERFACE ---
 from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.live import Live
 
-# --------------------------------------------------
-# CONFIGURAÇÃO INICIAL
-# --------------------------------------------------
 load_dotenv()
 console = Console()
 
+# --- CONFIGURAÇÕES ---
 DB_DIR = "./dnd_db_2026"
+JSON_PATH = "rag_ready_v2.json" # Usamos o JSON para criar o BM25 na memória (é rápido)
 GEMINI_MODEL = "gemini-flash-latest"
 
-# --------------------------------------------------
-# CHECAGEM DE SISTEMA
-# --------------------------------------------------
-def check_system():
-    with console.status(
-        "[bold yellow]🔍 Verificando integridade dos grimórios...[/bold yellow]",
-        spinner="dots"
-    ):
-        time.sleep(1)
+def setup_agent_pro():
+    with console.status("[bold purple]🔮 Conjurando arquitetura Híbrida...[/bold purple]", spinner="moon"):
+        
+        # 1. Configurar LLM
+        llm = ChatGoogleGenerativeAI(model=GEMINI_MODEL, temperature=0.2)
 
-        if "GOOGLE_API_KEY" not in os.environ:
-            console.print("[bold red]❌ GOOGLE_API_KEY não encontrada[/bold red]")
-            console.print("[yellow]→ Verifique o arquivo .env[/yellow]")
-            raise SystemExit(1)
+        # 2. Carregar Banco Vetorial (Chroma)
+        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+        vector_db = Chroma(persist_directory=DB_DIR, embedding_function=embeddings, collection_name="dnd_rules")
+        chroma_retriever = vector_db.as_retriever(search_kwargs={"k": 4})
 
-        if not os.path.exists(DB_DIR):
-            console.print(f"[bold red]❌ Banco vetorial '{DB_DIR}' não encontrado[/bold red]")
-            console.print("[yellow]→ Execute create_db_hybrid.py ou ingest_pdf.py primeiro[/yellow]")
-            raise SystemExit(1)
+        # 3. Criar BM25 (Busca por Palavra-Chave) em Memória
+        # Isso garante que nomes exatos (ex: "Mísseis Mágicos") sejam encontrados.
+        if os.path.exists(JSON_PATH):
+            with open(JSON_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            # Recria documentos para o BM25 indexar
+            docs = [Document(page_content=d["content"], metadata=d["metadata"]) for d in data]
+            bm25_retriever = BM25Retriever.from_documents(docs)
+            bm25_retriever.k = 4
+        else:
+            console.print("[red]⚠️ JSON não encontrado. Rodando apenas com Vetorial.[/red]")
+            bm25_retriever = None
 
-    console.print("[bold green]✅ Sistema validado![/bold green]\n")
+        # 4. Ensemble (Híbrido)
+        # Pesos: 60% Vetorial (Conceito) + 40% BM25 (Termo Exato)
+        if bm25_retriever:
+            ensemble_retriever = EnsembleRetriever(
+                retrievers=[chroma_retriever, bm25_retriever],
+                weights=[0.6, 0.4]
+            )
+        else:
+            ensemble_retriever = chroma_retriever
 
-# --------------------------------------------------
-# PROMPT (LCEL) COM MEMÓRIA
-# --------------------------------------------------
-PROMPT = ChatPromptTemplate.from_messages([
-    (
-        "system",
-        "Você é um Mestre de D&D 5ª Edição experiente.\n"
-        "Use o contexto fornecido como FONTE PRINCIPAL.\n"
-        "Quando a resposta não estiver explícita, mas puder ser deduzida pelas regras oficiais de D&D 5e, explique o raciocínio.\n"
-        "Não invente magias ou regras inexistentes.\n"
-        "Responda em português usando Markdown."
-    ),
-    MessagesPlaceholder(variable_name="history"),
-    (
-        "human",
-        "CONTEXTO DO GRIMÓRIO (REGRAS):\n{context}\n\n"
-        "PERGUNTA DO JOGADOR:\n{question}"
-    )
-])
-
-
-# --------------------------------------------------
-# SETUP DO AGENTE (LCEL MODERNO)
-# --------------------------------------------------
-def setup_agent():
-    with console.status(
-        "[bold purple]🔮 Invocando o Mestre dos Magos...[/bold purple]",
-        spinner="moon"
-    ):
-        embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+        # 5. Multi-Query (O "Pulo do Gato")
+        # O LLM reescreve a pergunta do usuário para cobrir mais ângulos
+        # Ex: "Como bate duas vezes?" -> "Regras de Ataque Extra", "Ação bônus ataque", etc.
+        multi_query_retriever = MultiQueryRetriever.from_llm(
+            retriever=ensemble_retriever,
+            llm=llm
         )
 
-        # ⚠️ CORREÇÃO: Adicionado collection_name para achar os dados do PDF
-        vector_db = Chroma(
-            persist_directory=DB_DIR,
-            embedding_function=embeddings,
-            collection_name="dnd_rules" 
+        # 6. Prompt do Mestre
+        system_prompt = (
+            "Você é um Mestre de D&D 5ª Edição sábio e preciso.\n"
+            "Use APENAS o contexto fornecido para responder.\n"
+            "Se o contexto tiver o título da seção (ex: 'Capítulo 3: Classes > Guerreiro'), use isso para saber de quem é a regra.\n"
+            "Se a resposta não estiver no contexto, diga que não sabe. Não alucine regras.\n"
+            "Responda em Português do Brasil com formatação Markdown clara."
         )
 
-        retriever = vector_db.as_retriever(search_kwargs={"k": 8})
-
-        llm = ChatGoogleGenerativeAI(
-            model=GEMINI_MODEL,
-            temperature=0.0,
-            streaming=False
-        )
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            MessagesPlaceholder(variable_name="history"),
+            ("human", "CONTEXTO RECUPERADO:\n{context}\n\nPERGUNTA:\n{question}")
+        ])
 
         def format_docs(docs):
-            return "\n\n".join(doc.page_content for doc in docs)
+            return "\n\n".join([f"[{doc.metadata.get('chapter', 'Geral')}]: {doc.page_content}" for doc in docs])
 
-        # Chain LCEL com injeção de contexto + memória
-        rag_chain = (
-            RunnablePassthrough.assign(
-                context=(lambda x: x["question"]) | retriever | format_docs
-            )
-            | PROMPT
+        # Chain
+        chain = (
+            RunnablePassthrough.assign(context=(lambda x: x["question"]) | multi_query_retriever | format_docs)
+            | prompt
             | llm
             | StrOutputParser()
         )
 
-        # Histórico em memória volátil
+        # Memória
         chat_history = ChatMessageHistory()
-
-        conversational_chain = RunnableWithMessageHistory(
-            rag_chain,
+        
+        return RunnableWithMessageHistory(
+            chain,
             lambda session_id: chat_history,
             input_messages_key="question",
             history_messages_key="history"
         )
 
-    return conversational_chain
-
-# --------------------------------------------------
-# LOOP PRINCIPAL
-# --------------------------------------------------
 def main():
     console.clear()
-    console.print(Panel.fit(
-        "[bold yellow]🐉 RAG D&D 5e — Mestre Digital (LCEL)[/bold yellow]\n"
-        "[italic]Pergunte sobre regras, magias, monstros...[/italic]",
-        border_style="red",
-        subtitle="v3.3 • Full Connected"
-    ))
-
-    check_system()
-    chain = setup_agent()
-
-    console.print("[dim]Sistema online. Digite 'sair' para encerrar.[/dim]\n")
+    console.print(Panel.fit("[bold yellow]🐉 D&D RAG PRO (Híbrido + Multi-Query)[/bold yellow]", border_style="red"))
+    
+    agent = setup_agent_pro()
+    
+    console.print("[dim]Sistema pronto. Digite 'sair' para encerrar.[/dim]\n")
 
     while True:
-        try:
-            user_input = console.input("[bold cyan]🧙 Você:[/bold cyan] ")
-
-            if user_input.lower() in {"sair", "exit", "quit"}:
-                console.print("[bold red]🎲 O Mestre encerra a sessão.[/bold red]")
-                break
-
-            if not user_input.strip():
-                continue
-
-            start_time = time.time()
-            resposta_final = ""
-
-            with Live(
-                Panel("Consultando os grimórios...", title="📜 Mestre", border_style="green"),
-                refresh_per_second=12
-            ) as live_panel:
-
-                resposta = chain.invoke(
-                    {"question": user_input},
-                    config={"configurable": {"session_id": "mesa-principal"}}
-                )
-
-                # Renderiza resposta completa corretamente em Markdown
-                live_panel.update(
-                    Panel(
-                        Markdown(resposta),
-                        title="📜 Mestre",
-                        border_style="green",
-                        padding=(1, 2)
-                    )
-                )
-
-            tempo = time.time() - start_time
-            console.print(f"[dim right]Tempo: {tempo:.2f}s[/dim right]\n")
-
-        except KeyboardInterrupt:
-            print("\n")
-            break
-        except Exception as e:
-            console.print(f"[bold red]❌ Erro inesperado:[/bold red] {e}")
+        user_input = console.input("[bold cyan]🧙 Pergunta:[/bold cyan] ")
+        if user_input.lower() in ["sair", "exit"]: break
+        
+        with Live(Panel("Consultando os planos...", title="Mestre", border_style="green"), refresh_per_second=10) as live:
+            response = agent.invoke(
+                {"question": user_input},
+                config={"configurable": {"session_id": "mesa_pro"}}
+            )
+            live.update(Panel(Markdown(response), title="Mestre", border_style="green"))
 
 if __name__ == "__main__":
     main()

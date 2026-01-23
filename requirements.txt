@@ -1,23 +1,19 @@
-# --- LangChain Core (MODERNO / LCEL) ---
-langchain>=0.3.1
-langchain-core>=0.3.7
-langchain-community>=0.3.7
+langchain==0.3.14
+langchain-core==0.3.29
+langchain-community==0.3.14
 
-# --- Integrações de IA e Vetores ---
-langchain-google-genai>=2.0.6
-langchain-chroma>=0.1.4
-langchain-huggingface>=0.1.0
-google-generativeai>=0.8.3
+langchain-google-genai==2.0.6
+langchain-chroma==0.1.4
+langchain-huggingface==0.1.0
 
-# --- Banco Vetorial e Embeddings ---
-chromadb>=0.5.5
-sentence-transformers>=3.1.0
+chromadb==0.5.3
+sentence-transformers==3.1.0
+rank-bm25==0.2.2
 
-# --- Utilitários ---
+google-generativeai==0.8.6
+
 requests>=2.32.0
 python-dotenv>=1.0.1
 pypdf>=5.0.0
 tqdm>=4.66.0
-
-# --- Interface ---
 rich>=13.8.0

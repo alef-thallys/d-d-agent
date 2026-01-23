@@ -11,7 +11,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 # --- CONFIGURAÇÃO ---
-JSON_PATH = "rag_ready_manual.json"
+JSON_PATH = "rag_ready_v2.json"
 CHROMA_PATH = "./dnd_db_2026"         # Mesmo diretório do agente
 COLLECTION_NAME = "dnd_rules"         # Mesma coleção do agente
 EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
