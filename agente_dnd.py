@@ -57,18 +57,20 @@ def check_system():
 PROMPT = ChatPromptTemplate.from_messages([
     (
         "system",
-        "Você é um Mestre de D&D 5ª Edição experiente e imersivo.\n"
-        "Use APENAS o contexto fornecido abaixo para responder.\n"
-        "Responda em português usando Markdown.\n"
-        "Se a resposta não estiver no contexto, diga claramente que não encontrou nos livros oficiais."
+        "Você é um Mestre de D&D 5ª Edição experiente.\n"
+        "Use o contexto fornecido como FONTE PRINCIPAL.\n"
+        "Quando a resposta não estiver explícita, mas puder ser deduzida pelas regras oficiais de D&D 5e, explique o raciocínio.\n"
+        "Não invente magias ou regras inexistentes.\n"
+        "Responda em português usando Markdown."
     ),
-    MessagesPlaceholder(variable_name="history"), # <--- O histórico entra aqui automaticamente
+    MessagesPlaceholder(variable_name="history"),
     (
         "human",
         "CONTEXTO DO GRIMÓRIO (REGRAS):\n{context}\n\n"
         "PERGUNTA DO JOGADOR:\n{question}"
     )
 ])
+
 
 # --------------------------------------------------
 # SETUP DO AGENTE (LCEL MODERNO)
@@ -89,12 +91,12 @@ def setup_agent():
             collection_name="dnd_rules" 
         )
 
-        retriever = vector_db.as_retriever(search_kwargs={"k": 5})
+        retriever = vector_db.as_retriever(search_kwargs={"k": 8})
 
         llm = ChatGoogleGenerativeAI(
             model=GEMINI_MODEL,
             temperature=0.0,
-            streaming=True
+            streaming=False
         )
 
         def format_docs(docs):
@@ -163,17 +165,15 @@ def main():
                     config={"configurable": {"session_id": "mesa-principal"}}
                 )
 
-                # Simulação visual de digitação
-                for word in resposta.split():
-                    resposta_final += word + " "
-                    time.sleep(0.03)
-                    live_panel.update(
-                        Panel(
-                            Markdown(resposta_final),
-                            title="📜 Mestre",
-                            border_style="green"
-                        )
+                # Renderiza resposta completa corretamente em Markdown
+                live_panel.update(
+                    Panel(
+                        Markdown(resposta),
+                        title="📜 Mestre",
+                        border_style="green",
+                        padding=(1, 2)
                     )
+                )
 
             tempo = time.time() - start_time
             console.print(f"[dim right]Tempo: {tempo:.2f}s[/dim right]\n")
