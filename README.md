@@ -128,7 +128,7 @@ python agente_dnd.py
 ```
 dnd-grimoire/
 ├── biblioteca/                      # PDFs de D&D (já incluído)
-│   └── dd-5e-livro-do-jogador-fundo-branco-biblioteca-elfica.pdf
+│   └── dd-5e-livro-do-jogador.pdf
 ├── agente_dnd.py                    # Script principal do agente
 ├── ingest_pdf.py                    # Processa PDF → JSON
 ├── create_db_hybrid.py              # Cria banco vetorial
