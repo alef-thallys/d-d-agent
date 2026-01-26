@@ -1,6 +1,6 @@
 # 🎲 D&D Agent - Assistente Inteligente para Dungeons & Dragons 5ª Edição
 
-Um agente conversacional RAG (Retrieval-Augmented Generation) especializado em regras de D&D 5e, usando busca híbrida (vetorial + BM25) e modelo Gemini para fornecer respostas precisas baseadas no Livro do Jogador.
+Um agente conversacional RAG (Retrieval-Augmented Generation) especializado em regras de D&D 5e, usando busca híbrida (vetorial + BM25) e modelo Gemini para fornecer respostas precisas baseadas nos livros de D&D.
 
 ## ✨ Características
 
@@ -128,7 +128,7 @@ python agente_dnd.py
 ```
 dnd-grimoire/
 ├── biblioteca/                      # PDFs de D&D (já incluído)
-│   └── dd-5e-livro-do-jogador-fundo-branco-biblioteca-elfica.pdf
+│   └── dd-5e-livro-do-jogador.pdf
 ├── agente_dnd.py                    # Script principal do agente
 ├── ingest_pdf.py                    # Processa PDF → JSON
 ├── create_db_hybrid.py              # Cria banco vetorial
