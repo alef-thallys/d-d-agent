@@ -5,111 +5,121 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from rich.console import Console
 from rich.panel import Panel
+from rich.progress import track
 from rich.theme import Theme
 
 LIB_DIR = "./biblioteca"
 OUTPUT_JSON = "rag_v5.json" 
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
-PAGE_OFFSET = -1 
-
-CHAPTER_MAP = {
-    "Capítulo 1: Criação de Personagem": 11,   
-    "Capítulo 2: Raças": 17,
-    "Capítulo 3: Classes": 45,
-    "Capítulo 4: Personalidade e Antecedentes": 121,
-    "Capítulo 5: Equipamento": 143,
-    "Capítulo 6: Opções de Personalização": 163,
-    "Capítulo 7: Utilizando Habilidades": 173,
-    "Capítulo 8: Aventurando-se": 181,
-    "Capítulo 9: Combate": 189,
-    "Capítulo 10: Conjuração": 201,
-    "Capítulo 11: Magias": 207,
-    "Apêndice A: Condições": 290,
-    "FIM": 999
-}
-
-console = Console(theme=Theme({"info": "cyan", "success": "bold green", "warning": "yellow"}))
 
 SECTION_PATTERN = re.compile(r"(?:^|\n)\s*([A-ZÃÁÂÊÉÍÕÓÚÇ][A-ZÃÁÂÊÉÍÕÓÚÇ\s\-:]{3,})(?:\n|$)")
 
+console = Console(theme=Theme({"info": "cyan", "success": "bold green", "warning": "yellow", "error": "bold red"}))
+
+def clean_filename(filename):
+    name = os.path.splitext(filename)[0]
+    name = name.replace("-", " ").replace("_", " ").title()
+    return name
+
 def clean_text(text):
-    text = re.sub(r'LIVRO DO JOGADOR', '', text)
     text = re.sub(r'\n\s*\d+\s*\n', '\n', text)
     text = re.sub(r'(\w+)-\s*\n\s*(\w+)', r'\1\2', text)
     return text
 
 def process_pdf(file_path):
-    console.print(Panel(f"📘 Lendo PDF (Modo PRO): {os.path.basename(file_path)}", style="blue"))
-    loader = PyPDFLoader(file_path)
-    all_pages = loader.load()
-    total_pages_pdf = len(all_pages)
+    filename_display = clean_filename(os.path.basename(file_path))
+    console.print(Panel(f"📘 Processando: {filename_display}", style="blue"))
     
+    try:
+        loader = PyPDFLoader(file_path)
+        pages = loader.load()
+    except Exception as e:
+        console.print(f"[error]Erro ao ler {file_path}: {e}[/error]")
+        return []
+
+    full_text = "\n".join([p.page_content for p in pages])
+    full_text = clean_text(full_text)
+
+    fragments = SECTION_PATTERN.split(full_text)
     rag_docs = []
-    sorted_chapters = sorted(CHAPTER_MAP.items(), key=lambda x: x[1])
-
-    for i in range(len(sorted_chapters) - 1):
-        chapter_title, start_page = sorted_chapters[i]
-        _, next_start_page = sorted_chapters[i+1]
+    current_section = "Introdução/Geral"
+    
+    if len(fragments) == 1:
+        content_parts = [fragments[0]]
+        section_titles = [current_section]
+    else:
+        content_parts = [fragments[0]]
+        section_titles = [current_section]
         
-        idx_start = max(0, start_page - 1 + PAGE_OFFSET)
-        idx_end = min(total_pages_pdf, next_start_page - 1 + PAGE_OFFSET)
-
-        if idx_start >= total_pages_pdf: continue
-
-        chapter_pages = all_pages[idx_start:idx_end]
-        chapter_text = "\n".join([p.page_content for p in chapter_pages])
-        chapter_text = clean_text(chapter_text)
-
-        console.print(f"[info]📖 Processando {chapter_title}...[/info]")
-
-        sections = SECTION_PATTERN.split(chapter_text)
-        current_section = "Introdução"
-
-        for j, segment in enumerate(sections):
-            segment = segment.strip()
-            if not segment: continue
-
-            if j % 2 != 0: 
-                current_section = segment.title()
-                continue
+        for i in range(1, len(fragments), 2):
+            title = fragments[i].strip()
+            content = fragments[i+1] if i+1 < len(fragments) else ""
             
-            splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
-            chunks = splitter.split_text(segment)
-            
-            for chunk in chunks:
-                if len(chunk) < 50: continue
-                
-                contextualized_content = f"Fonte: {chapter_title} > {current_section}\n---\n{chunk}"
-                
-                rag_docs.append({
-                    "content": contextualized_content,
-                    "metadata": {
-                        "source": os.path.basename(file_path),
-                        "chapter": chapter_title,
-                        "section": current_section,
-                        "original_content": chunk
-                    }
-                })
+            section_titles.append(title.title()) 
+            content_parts.append(content)
 
+    splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
+
+    total_chunks_file = 0
+    
+    for section_title, content in zip(section_titles, content_parts):
+        if not content.strip(): continue
+
+        chunks = splitter.split_text(content)
+        
+        for chunk in chunks:
+            if len(chunk) < 50: continue 
+            
+            contextualized_content = f"Livro: {filename_display}\nSeção: {section_title}\n---\n{chunk}"
+            
+            rag_docs.append({
+                "content": contextualized_content,
+                "metadata": {
+                    "source": os.path.basename(file_path),
+                    "book_name": filename_display,
+                    "section": section_title,
+                    "original_content": chunk
+                }
+            })
+            total_chunks_file += 1
+
+    console.print(f"[info]   -> {len(pages)} páginas lidas.[/info]")
+    console.print(f"[success]   -> {total_chunks_file} chunks gerados.[/success]")
+    
     return rag_docs
 
 def main():
     if not os.path.exists(LIB_DIR):
-        console.print(f"[error]Pasta {LIB_DIR} não existe![/error]")
+        console.print(f"[error]Pasta {LIB_DIR} não encontrada! Crie-a e coloque seus PDFs lá.[/error]")
         return
 
     pdf_files = [f for f in os.listdir(LIB_DIR) if f.lower().endswith(".pdf")]
+    
+    if not pdf_files:
+        console.print(f"[warning]Nenhum PDF encontrado em {LIB_DIR}.[/warning]")
+        return
+
     all_docs = []
+    console.print(f"[bold]📚 Iniciando ingestão de {len(pdf_files)} livros...[/bold]")
 
     for pdf in pdf_files:
         docs = process_pdf(os.path.join(LIB_DIR, pdf))
         all_docs.extend(docs)
 
+    console.print(Panel(f"💾 Salvando banco de dados JSON...", style="yellow"))
+    
     with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
         json.dump(all_docs, f, ensure_ascii=False, indent=2)
 
-    console.print(Panel(f"💾 Sucesso! {len(all_docs)} chunks contextualizados gerados.\nSalvo em: {OUTPUT_JSON}\n[yellow]Agora rode o create_db_hybrid.py (aponte para este novo JSON)[/yellow]", style="bold green"))
+    console.print(Panel(
+        f"[bold green]CONCLUÍDO![/bold green]\n"
+        f"Total de Fragmentos: {len(all_docs)}\n"
+        f"Arquivo gerado: {OUTPUT_JSON}\n\n"
+        f"[white]Próximo passo: Rode 'python create_db_hybrid.py'[/white]",
+        title="Ingestão Finalizada",
+        border_style="green"
+    ))
 
 if __name__ == "__main__":
     main()
