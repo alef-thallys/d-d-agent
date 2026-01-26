@@ -215,10 +215,6 @@ python create_db_hybrid.py
 
 Este projeto é um estudo acadêmico. Os PDFs de D&D são propriedade da Wizards of the Coast.
 
-## 🤝 Contribuições
-
-Sugestões e melhorias são bem-vindas! Abra uma issue ou PR.
-
 ---
 
 **Feito com ❤️ e um d20 de sorte**
