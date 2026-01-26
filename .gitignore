@@ -1,8 +1,6 @@
 .env
 .vscode
-
 *.json
-*.pdf
+venv
 
 dnd_db_2026
-venv
