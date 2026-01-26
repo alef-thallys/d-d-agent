@@ -30,8 +30,8 @@ Um agente conversacional RAG (Retrieval-Augmented Generation) especializado em r
 ### 1. Clone o repositório
 
 ```bash
-git clone https://github.com/alef-thallys/d-d-agent.git
-cd d-d-agent
+git clone https://github.com/alef-thallys/dnd-grimoire.git
+cd dnd-grimoire
 ```
 
 ### 2. Crie um ambiente virtual
@@ -126,7 +126,7 @@ python agente_dnd.py
 ## 📁 Estrutura do Projeto
 
 ```
-d-d-agent/
+dnd-grimoire/
 ├── biblioteca/                      # PDFs de D&D (já incluído)
 │   └── dd-5e-livro-do-jogador-fundo-branco-biblioteca-elfica.pdf
 ├── agente_dnd.py                    # Script principal do agente
