@@ -1,6 +1,6 @@
 # 🎲 D&D Agent - Assistente Inteligente para Dungeons & Dragons 5ª Edição
 
-Um agente conversacional RAG (Retrieval-Augmented Generation) especializado em regras de D&D 5e, usando busca híbrida (vetorial + BM25) e modelo Gemini para fornecer respostas precisas baseadas no Livro do Jogador.
+Um agente conversacional RAG (Retrieval-Augmented Generation) especializado em regras de D&D 5e, usando busca híbrida (vetorial + BM25) e modelo Gemini para fornecer respostas precisas baseadas nos livros de D&D.
 
 ## ✨ Características
 
