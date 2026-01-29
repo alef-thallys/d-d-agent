@@ -1,5 +1,7 @@
 import os
 import json
+import logging
+
 from dotenv import load_dotenv
 
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -19,6 +21,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.live import Live
+
+logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
 
 load_dotenv()
 console = Console()
